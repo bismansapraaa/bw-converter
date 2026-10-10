@@ -1,10 +1,11 @@
+import json
 import os
 import shutil
-import smtplib
 import threading
+import urllib.error
+import urllib.request
 import uuid
 import zipfile
-from email.message import EmailMessage
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -16,25 +17,36 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024**3  # reject uploads larger than 2 GB
 
 JOBS_DIR = Path("jobs")
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_USER = os.environ.get("SMTP_USER")  # the address emails are sent from
-SMTP_PASS = os.environ.get("SMTP_PASS")  # for Gmail: an "app password", not your normal password
+
+# Email is sent through Brevo's web API (port 443), because free Render
+# instances block the SMTP ports that Gmail uses.
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL")  # must be verified in your Brevo account
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000")
-ATTACH_LIMIT = 20 * 1024 * 1024  # most mail providers refuse attachments over ~25 MB
 
 
-def send_email(to, subject, body, attachment=None):
-    msg = EmailMessage()
-    msg["From"], msg["To"], msg["Subject"] = SMTP_USER, to, subject
-    msg.set_content(body)
-    if attachment:
-        msg.add_attachment(
-            Path(attachment).read_bytes(),
-            maintype="application", subtype="zip", filename="black-and-white.zip",
-        )
-    with smtplib.SMTP_SSL(SMTP_HOST, 465) as server:
-        server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
+def send_email(to, subject, body):
+    payload = {
+        "sender": {"name": "Black & White", "email": SENDER_EMAIL},
+        "to": [{"email": to}],
+        "subject": subject,
+        "textContent": body,
+    }
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json",
+            "accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=30)
+    except urllib.error.HTTPError as e:
+        print("Brevo error:", e.code, e.read().decode("utf-8", "ignore"))
+        raise
 
 
 def process_job(job_id, email, mode):
@@ -49,7 +61,8 @@ def process_job(job_id, email, mode):
                     done += 1
                 else:
                     failed += 1
-            except Exception:
+            except Exception as e:
+                print("Convert failed:", f.name, e)
                 failed += 1
 
         zip_path = job / "result.zip"
@@ -59,11 +72,13 @@ def process_job(job_id, email, mode):
         shutil.rmtree(in_dir, ignore_errors=True)  # delete the originals right away
 
         note = f"{done} file(s) converted." + (f" {failed} could not be converted." if failed else "")
-        if zip_path.stat().st_size <= ATTACH_LIMIT:
-            send_email(email, "Your black and white files", note + "\n\nThey're attached as a zip.", zip_path)
-        else:
-            link = f"{BASE_URL}/download/{job_id}"
-            send_email(email, "Your black and white files", note + f"\n\nThe zip is too large to attach. Download it here:\n{link}")
+        link = f"{BASE_URL}/download/{job_id}"
+        send_email(
+            email,
+            "Your black and white files are ready",
+            f"{note}\n\nDownload your zip here:\n{link}\n\n"
+            "Please download it soon. The link may stop working after a while.",
+        )
     except Exception as e:
         print("Job failed:", job_id, e)
         try:
@@ -87,7 +102,7 @@ def upload():
         return jsonify(error="Enter a valid email address."), 400
     if not files:
         return jsonify(error="Choose at least one photo or video."), 400
-    if not (SMTP_USER and SMTP_PASS):
+    if not (BREVO_API_KEY and SENDER_EMAIL):
         return jsonify(error="The server's email isn't set up yet."), 500
 
     job_id = uuid.uuid4().hex
@@ -115,4 +130,4 @@ def download(job_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+ app.run(debug=True)
