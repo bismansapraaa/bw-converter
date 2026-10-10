@@ -24,7 +24,7 @@
     }
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  html, body { min-height: 100%; margin: 0; }
   body {
     background: var(--bg);
     color: var(--ink);
@@ -32,6 +32,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 100vh;
     padding: 24px;
   }
   main { width: 100%; max-width: 560px; text-align: center; }
@@ -44,25 +45,30 @@
     background: var(--panel);
     padding: 56px 24px;
     cursor: pointer;
-    filter: grayscale(1);
-    transition: border-color .15s, background .15s;
+    transition: border-color .15s;
   }
   .drop:hover, .drop.over { border-color: var(--accent); }
   .drop:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .drop.busy { opacity: .5; pointer-events: none; }
   .drop strong { display: block; font-size: 1.25rem; font-weight: 400; margin-bottom: 6px; }
   .drop span { color: var(--muted); font-size: .95rem; }
   input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 
-  .status { margin-top: 28px; min-height: 3.5em; }
+  .status { margin-top: 28px; }
   .status p { margin: 0 0 12px; font-size: 1.05rem; }
   .bar { height: 4px; background: var(--line); overflow: hidden; display: none; }
   .bar i { display: block; height: 100%; width: 35%; background: var(--accent); animation: slide 1.2s linear infinite; }
   @keyframes slide { from { margin-left: -35%; } to { margin-left: 100%; } }
   @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; opacity: .4; } }
 
+  ul.files { list-style: none; margin: 16px 0 0; padding: 0; text-align: left; max-height: 240px; overflow-y: auto; }
+  ul.files li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .95rem; }
+  ul.files li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.files li span:last-child { color: var(--muted); white-space: nowrap; }
+
   .btn {
     display: none;
-    margin-top: 8px;
+    margin-top: 20px;
     padding: 12px 28px;
     background: var(--accent);
     color: var(--bg);
@@ -75,79 +81,150 @@
 <body>
 <main>
   <h1>Make it black &amp; white</h1>
-  <p class="sub">Choose a photo or a video. It converts here and downloads on its own when it is ready.</p>
+  <p class="sub">Choose one or many photos, or a video. It converts here and downloads on its own when it is ready.</p>
 
   <label class="drop" id="drop">
-    <input type="file" id="video" accept="image/*,video/*">
-    <strong>Select a photo or video</strong>
-    <span>or drop it here</span>
+    <input type="file" id="picker" accept="image/*,video/*" multiple>
+    <strong>Select photos or a video</strong>
+    <span>or drop them here</span>
   </label>
 
   <div class="status" aria-live="polite">
     <p id="msg"></p>
     <div class="bar" id="bar"><i></i></div>
+    <ul class="files" id="list"></ul>
     <a id="dl" class="btn">Download again</a>
   </div>
 </main>
 
 <script>
-const input = document.getElementById("video");
+const CHUNK = 5 * 1024 * 1024;            // 5 MB pieces, so big videos upload fine
+const MAX_FILE = 1024 * 1024 * 1024;      // 1 GB per file
+const IMG = /\.(jpe?g|png|webp|bmp|gif|tiff?)$/i;
+const VID = /\.(mp4|mov|avi|mkv|webm|m4v|3gp|wmv|flv)$/i;
+
+const picker = document.getElementById("picker");
 const drop = document.getElementById("drop");
 const msg = document.getElementById("msg");
 const bar = document.getElementById("bar");
+const list = document.getElementById("list");
 const dl = document.getElementById("dl");
+let busy = false;
 
-input.addEventListener("change", () => start(input.files[0]));
+picker.addEventListener("change", () => { start([...picker.files]); picker.value = ""; });
 
 ["dragenter", "dragover"].forEach(ev =>
   drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev =>
   drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", e => start(e.dataTransfer.files[0]));
+drop.addEventListener("drop", e => start([...e.dataTransfer.files]));
 
-function fail(text) {
-  bar.style.display = "none";
-  msg.textContent = text;
+function newId() {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function start(file) {
-  if (!file) return;
-  if (!file.type.startsWith("video/") && !file.type.startsWith("image/")) { fail("Please choose a photo or a video."); return; }
+function setBusy(on) {
+  busy = on;
+  drop.classList.toggle("busy", on);
+  bar.style.display = on ? "block" : "none";
+}
 
-  dl.style.display = "none";
-  bar.style.display = "block";
-  msg.textContent = "Uploading " + file.name + "…";
+function addRow(name) {
+  const li = document.createElement("li");
+  const a = document.createElement("span");
+  const b = document.createElement("span");
+  a.textContent = name;
+  b.textContent = "Waiting";
+  li.append(a, b);
+  list.appendChild(li);
+  return b;
+}
 
-  const fd = new FormData();
-  fd.append("file", file);
+async function sendChunk(fd) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch("/chunk", { method: "POST", body: fd });
+      if (res.ok) return await res.json();
+    } catch (e) { /* retry */ }
+    await new Promise(r => setTimeout(r, 1500 * attempt));
+  }
+  throw new Error("upload failed");
+}
 
-  let job_id;
-  try {
-    const res = await fetch("/upload", { method: "POST", body: fd });
-    if (!res.ok) throw new Error();
-    job_id = (await res.json()).job_id;
-  } catch (e) {
-    fail("Upload failed. Use a JPG, PNG, WEBP, MP4 or MOV file, or try a smaller one.");
+async function uploadFile(file, label) {
+  const id = newId();
+  const total = Math.max(1, Math.ceil(file.size / CHUNK));
+  let result;
+  for (let i = 0; i < total; i++) {
+    const fd = new FormData();
+    fd.append("upload_id", id);
+    fd.append("index", i);
+    fd.append("total", total);
+    fd.append("filename", file.name);
+    fd.append("chunk", file.slice(i * CHUNK, (i + 1) * CHUNK), "blob");
+    result = await sendChunk(fd);
+    label.textContent = "Uploading " + Math.round(((i + 1) / total) * 100) + "%";
+  }
+  return result.job_id;
+}
+
+async function start(files) {
+  if (busy || !files.length) return;
+
+  const ok = files.filter(f => (IMG.test(f.name) || VID.test(f.name)) && f.size <= MAX_FILE);
+  if (!ok.length) {
+    msg.textContent = "Use JPG, PNG or WEBP photos, or MP4 or MOV videos up to 1 GB each.";
     return;
   }
 
+  setBusy(true);
+  dl.style.display = "none";
+  list.innerHTML = "";
+  const skipped = files.length - ok.length;
+  msg.textContent = "Uploading " + ok.length + (ok.length === 1 ? " file…" : " files…");
+
+  const jobs = [];   // { id, label }
+  for (const f of files) {
+    if (!ok.includes(f)) { addRow(f.name).textContent = "Skipped"; continue; }
+    const label = addRow(f.name);
+    try {
+      const id = await uploadFile(f, label);
+      label.textContent = "Converting…";
+      jobs.push({ id, label });
+    } catch (e) {
+      label.textContent = "Upload failed";
+    }
+  }
+
+  if (!jobs.length) { setBusy(false); msg.textContent = "Nothing was uploaded. Check your connection and try again."; return; }
+
   msg.textContent = "Converting to black & white…";
+  const done = [];
+  const pending = new Set(jobs);
 
   const timer = setInterval(async () => {
-    try {
-      const s = await (await fetch("/status/" + job_id)).json();
-      if (s.status === "done") {
-        clearInterval(timer);
-        bar.style.display = "none";
-        msg.textContent = "Done. Your download is starting.";
-        dl.href = "/download/" + job_id;
-        dl.style.display = "inline-block";
-        window.location.href = "/download/" + job_id;
-      } else if (s.status === "error") {
-        clearInterval(timer);
-        fail("Conversion failed. Try a smaller file.");
-      }
-    } catch (e) { /* keep polling; the server may be busy */ }
+    for (const j of [...pending]) {
+      try {
+        const s = await (await fetch("/status/" + j.id)).json();
+        if (s.status === "done") { j.label.textContent = "Done"; pending.delete(j); done.push(j.id); }
+        else if (s.status === "error") { j.label.textContent = "Failed"; pending.delete(j); }
+      } catch (e) { /* keep polling */ }
+    }
+    if (pending.size) return;
+
+    clearInterval(timer);
+    setBusy(false);
+    if (!done.length) { msg.textContent = "Conversion failed. Try a smaller file or a different format."; return; }
+
+    const url = done.length === 1 ? "/download/" + done[0] : "/zip?ids=" + done.join(",");
+    const failed = jobs.length - done.length + skipped;
+    msg.textContent = "Done. Your download is starting." + (failed ? " " + failed + " file(s) could not be converted." : "");
+    dl.href = url;
+    dl.textContent = done.length === 1 ? "Download again" : "Download all again (zip)";
+    dl.style.display = "inline-block";
+    window.location.href = url;
   }, 2000);
 }
 </script>
