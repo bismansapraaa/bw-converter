@@ -29,8 +29,9 @@
 
 
 ## **4. Live link**
-https://bw-converter.onrender.com
+ https://bw-converter.onrender.com
 
 
 ## **5. Screenshot of the Interface**
-<img width="838" height="431" alt="Screenshot 2026-10-10 at 4 44 26 PM" src="https://github.com/user-attachments/assets/eda7db82-267b-44c1-9510-36875a622f59" />
+<img width="1005" height="662" alt="Screenshot 2026-10-10 at 5 08 16 PM" src="https://github.com/user-attachments/assets/65a17a94-9cc8-46ed-95ae-5b077471b4b8" />
+
