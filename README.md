@@ -11,7 +11,7 @@
 - Supported video types = 9 extensions (MP4, MOV, AVI, MKV, WebM, M4V, 3GP, WMV, FLV)
 - Photo conversion = Pillow, grayscale ("L" mode), with phone photo rotation (EXIF) fixed
 - Video conversion = ffmpeg (hue=s=0 filter), saved as MP4 (H.264 video, AAC audio)
-- Technology = Python, Flask, Pillow, ffmpeg, Gunicorn, Docker
+- Technology = Python, Flask, Pillow, ffmpeg, Docker
 - Hosting = Render (free instance)
 - Other information: one video and two photos convert at a time, so the small free server does not run out of memory. Files are stored for about 60 minutes only.
 
