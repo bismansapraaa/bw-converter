@@ -18,14 +18,22 @@
 
 ## **3. Input / Output**
 
-| Test Input | Expected Output | Actual Output | Result |
-|------------|-----------------|---------------|--------|
-| photo1.jpg (JPG photo) | Grayscale JPG | Grayscale JPG | ✔ |
-| photo2.png (PNG photo) | Grayscale PNG | Grayscale PNG | ✔ |
-| Phone photo, portrait | Grayscale, upright | Grayscale, upright | ✔ |
-| clip.mp4 (MP4 video) | Black and white MP4 with audio | Black and white MP4 with audio | ✔ |
-| 10 photos selected together | All converted, downloaded as one zip | All converted, downloaded as one zip | ✔ |
-| notes.txt (unsupported file) | Rejected with an error | Rejected with an error | ✘ |
+<table>
+  <tr>
+    <th align="center">Original Image</th>
+    <th align="center">Black & White Image</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="https://github.com/user-attachments/assets/e3ba4945-df01-45fb-ae2f-6387555219fe"
+           width="250" alt="Original Image" />
+    </td>
+    <td align="center">
+      <img src="https://github.com/user-attachments/assets/53f9fc99-9118-4637-9534-35a522c62a6b"
+           width="250" alt="Black and White Image" />
+    </td>
+  </tr>
+</table>
 
 
 ## **4. Live link**
