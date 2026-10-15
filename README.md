@@ -26,11 +26,11 @@
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/e3ba4945-df01-45fb-ae2f-6387555219fe"
-           width="250" alt="Original Image" />
+           width="240" alt="Original Image" />
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/53f9fc99-9118-4637-9534-35a522c62a6b"
-           width="250" alt="Black and White Image" />
+           width="240" alt="Black and White Image" />
     </td>
   </tr>
 </table>
